@@ -1,0 +1,24 @@
+:root {
+  color-scheme: dark;
+  font-family: "Pretendard", "Malgun Gothic", system-ui, sans-serif;
+  background: #15131b;
+  color: #f7f3fc;
+  --muted: #cec3d8;
+  --accent: #d2b5ff;
+}
+* { box-sizing: border-box; }
+body { min-height: 100vh; display: grid; place-items: center; margin: 0; padding: 24px; }
+main { width: min(100%, 570px); border: 1px solid #453b50; border-radius: 20px; background: #211b2a; padding: clamp(25px, 7vw, 48px); }
+.brand { display: flex; align-items: center; gap: 10px; color: var(--accent); font-weight: 750; font-size: .88rem; }
+.brand span { display: grid; place-items: center; border: 1px solid #785e9a; border-radius: 8px; width: 29px; height: 29px; }
+h1 { font-size: clamp(2rem, 6vw, 3.25rem); line-height: 1.16; letter-spacing: -.065em; margin: 25px 0 14px; }
+h2 { font-size: 1rem; margin: 0 0 8px; }
+p { color: var(--muted); line-height: 1.65; margin: 0; }
+a { border-radius: 9px; font-weight: 750; text-decoration: none; }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.primary { display: flex; justify-content: space-between; gap: 12px; margin-top: 24px; padding: 12px 15px; color: #281841; background: var(--accent); }
+.primary:hover { background: #e3ceff; }
+section { border-top: 1px solid #453b50; margin-top: 26px; padding-top: 22px; }
+section p { font-size: .87rem; }
+.secondary { display: inline-flex; gap: 12px; color: #e5ceff; margin-top: 12px; padding: 8px 10px; border: 1px solid #765f92; font-size: .86rem; }
+.secondary:hover { background: #382b48; }

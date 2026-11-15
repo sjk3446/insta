@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Instagram 로컬 다운로드</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <div class="product"><span class="mark" aria-hidden="true">↓</span> Instagram 로컬 다운로드</div>
+      <h1>게시물 다운로드</h1>
+      <p>공개 계정의 사진과 동영상을 선택한 폴더에 저장합니다.</p>
+    </header>
+
+    <section class="workspace" aria-label="다운로드 설정">
+      <form id="download">
+        <div class="section-heading"><h2>다운로드 설정</h2></div>
+        <div class="field">
+          <label for="username">인스타그램 ID</label>
+          <input id="username" name="username" type="text" placeholder="@계정명 또는 프로필 주소"
+                 autocomplete="off" autocapitalize="none" spellcheck="false" required>
+        </div>
+        <fieldset class="field">
+          <legend>파일 유형</legend>
+          <div class="segments">
+            <label><input name="mode" type="radio" value="photos" checked><span>사진</span></label>
+            <label><input name="mode" type="radio" value="videos"><span>동영상</span></label>
+            <label><input name="mode" type="radio" value="both"><span>사진 + 동영상</span></label>
+          </div>
+        </fieldset>
+        <fieldset class="field">
+          <legend>게시물 등록일</legend>
+          <div class="segments periods">
+            <label><input name="period" type="radio" value="all" checked><span>전체</span></label>
+            <label><input name="period" type="radio" value="month"><span>최근 1달</span></label>
+            <label><input name="period" type="radio" value="quarter"><span>최근 3달</span></label>
+            <label><input name="period" type="radio" value="custom"><span>기간 지정</span></label>
+          </div>
+          <div class="date-range" id="date-range" hidden>
+            <label for="date-from">시작일 <input id="date-from" type="date" disabled></label>
+            <label for="date-to">종료일 <input id="date-to" type="date" disabled></label>
+          </div>
+        </fieldset>
+        <div class="field">
+          <label for="directory">저장 폴더</label>
+          <div class="folder-row">
+            <input id="directory" type="text" autocomplete="off" spellcheck="false" placeholder="폴더를 선택하거나 경로를 입력하세요">
+            <button type="button" id="choose" class="secondary">폴더 선택</button>
+          </div>
+        </div>
+        <div class="field">
+          <label for="memo">계정 메모 <small>선택</small></label>
+          <textarea id="memo" name="memo" maxlength="300" rows="2" placeholder="다시 찾을 때 알아보기 쉽게 메모해 두세요"></textarea>
+        </div>
+        <fieldset class="field">
+          <legend>이어받기</legend>
+          <div class="segments">
+            <label><input name="download_scope" type="radio" value="all"><span>전체 재확인</span></label>
+            <label><input name="download_scope" type="radio" value="unseen" checked><span>미처리 게시물</span></label>
+            <label><input name="download_scope" type="radio" value="since"><span>지난 다운로드 이후</span></label>
+          </div>
+          <small id="scope-help">같은 계정과 폴더에서 이미 처리한 게시물을 건너뜁니다.</small>
+        </fieldset>
+        <p id="message" class="message" role="status"></p>
+        <div class="download-actions">
+          <button id="preview-photos" class="secondary" type="button">사진 미리보기</button>
+          <button id="start" class="primary" type="submit">다운로드 시작 <span aria-hidden="true">↓</span></button>
+        </div>
+      </form>
+
+      <aside class="accounts" aria-labelledby="accounts-title">
+        <div class="section-heading"><h2 id="accounts-title">저장된 계정</h2><span id="account-count" class="count">0</span></div>
+        <p id="accounts-empty" class="empty">작업을 시작한 계정이 여기에 표시됩니다.</p>
+        <ul id="accounts"></ul>
+      </aside>
+    </section>
+
+    <section class="history" id="photo-preview" aria-labelledby="photo-preview-title" hidden>
+      <div class="section-heading">
+        <h2 id="photo-preview-title">사진 미리보기</h2>
+        <button type="button" class="secondary" id="close-preview">닫기</button>
+      </div>
+      <p class="empty">선택한 게시물의 사진을 모두 저장합니다. 여러 장 게시물은 첫 사진을 표시합니다.</p>
+      <div class="photo-grid" id="photo-grid"></div>
+      <p id="preview-message" class="message" role="status"></p>
+      <div class="download-actions preview-actions">
+        <button type="button" class="secondary" id="more-photos">더 보기</button>
+        <button type="button" class="primary" id="save-selection" disabled>선택한 게시물 저장</button>
+      </div>
+    </section>
+
+    <section class="history" aria-labelledby="history-title">
+      <div class="section-heading"><h2 id="history-title">작업 기록</h2></div>
+      <p id="runs-empty" class="empty">아직 다운로드 기록이 없습니다.</p>
+      <div id="runs"></div>
+      <section id="log-panel" class="log-panel" aria-labelledby="log-title" hidden>
+        <div class="section-heading"><h3 id="log-title">실행 로그</h3><button type="button" class="secondary" id="close-log">닫기</button></div>
+        <pre id="log"></pre>
+      </section>
+    </section>
+  </main>
+</body>
+</html>

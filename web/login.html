@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>접속 비밀번호 | Instagram 다운로드</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/login.js" defer></script>
+</head>
+<body class="login">
+  <main class="login-card">
+    <div class="product"><span class="mark" aria-hidden="true">↓</span> Instagram 다운로드</div>
+    <h1>접속 비밀번호</h1>
+    <p>이 PC의 다운로드와 작업 기록을 열려면 비밀번호를 입력하세요.</p>
+    <form id="login" method="post" action="/api/login">
+      <div class="field">
+        <label for="password">비밀번호</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" maxlength="256" required autofocus>
+      </div>
+      <p id="login-message" class="message" role="status"></p>
+      <button class="primary" type="submit">접속 <span aria-hidden="true">→</span></button>
+    </form>
+  </main>
+</body>
+</html>
