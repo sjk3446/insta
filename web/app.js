@@ -26,7 +26,8 @@ let previewFolder = "";
 let previewLoading = false;
 const selectedPhotos = new Set();
 const statusNames = {
-  running: "진행 중", completed: "완료", partial: "부분 완료", failed: "오류", interrupted: "중단",
+  running: "진행 중", completed: "완료", partial: "부분 완료", failed: "오류",
+  interrupted: "중단", cancelled: "중지됨",
 };
 const modeNames = {photos: "사진", videos: "동영상", both: "사진 + 동영상"};
 const scopeHelpText = {
@@ -111,7 +112,8 @@ function renderRuns(rows) {
     const row = element("article", undefined, "run");
     const details = element("div");
     const heading = element("h3", "@" + run.username + " · ");
-    heading.append(element("span", statusNames[run.status], "status-" + run.status));
+    const status = run.stop_requested ? "중지 중" : statusNames[run.status];
+    heading.append(element("span", status, "status-" + run.status));
     const count = run.status === "running" ? "" : " · 새 파일 " + run.added + "개";
     const mode = run.since_last ? "지난 다운로드 이후" : run.incremental ? "미처리 게시물" : "전체 재확인";
     const period = run.date_from ? run.date_from + " ~ " + run.date_to : "전체";
@@ -125,9 +127,33 @@ function renderRuns(rows) {
     button.type = "button";
     button.setAttribute("aria-label", "@" + run.username + " 작업 " + run.id + " 로그 보기");
     button.addEventListener("click", () => openLog(run.id, run.username));
-    row.append(details, button);
+    const actions = element("div", undefined, "run-actions");
+    if (run.status === "running") {
+      const stop = element("button", run.stop_requested ? "중지 중" : "중지", "secondary stop");
+      stop.type = "button";
+      stop.disabled = run.stop_requested;
+      stop.addEventListener("click", () => stopRun(run, stop));
+      actions.append(stop);
+    }
+    actions.append(button);
+    row.append(details, actions);
     return row;
   }));
+}
+
+async function stopRun(run, button) {
+  button.disabled = true;
+  button.textContent = "중지 중";
+  openLog(run.id, run.username);
+  try {
+    await request("/api/runs/" + run.id + "/stop", {});
+    await refresh();
+  } catch (error) {
+    message.textContent = error.message;
+    button.disabled = false;
+    button.textContent = "중지";
+    await refresh().catch(() => {});
+  }
 }
 
 async function refreshLog() {

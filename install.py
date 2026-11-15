@@ -41,7 +41,7 @@ def main():
     if old_command and not old_command.endswith(f' "{destination / "launch.pyw"}"'):
         parser.exit(1, "The insta-local URL scheme is already used by another application.\n")
 
-    if find_spec("instaloader") is None:
+    if any(find_spec(dependency) is None for dependency in ("instaloader", "truststore")):
         subprocess.run([sys.executable, "-m", "pip", "install", "-r", str(SOURCE / "requirements.txt")], check=True)
     generated = None
     if not config.exists():

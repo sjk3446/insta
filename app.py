@@ -6,11 +6,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
+from random import expovariate
 import re
 import sqlite3
 import subprocess
 import sys
-from threading import Lock, Thread
+from threading import Event, Lock, Thread
 from urllib.parse import urlsplit
 import webbrowser
 
@@ -26,6 +27,9 @@ HEALTH_MARKER = "instagram-local-downloader-v1"
 PICKER_LOCK = Lock()
 INSPECT_LOCK = Lock()
 ACTIVE_PREVIEW = None
+RUN_CONTROL = Lock()
+STOP_EVENTS = {}
+REQUEST_TIMEOUT = 20
 NAME = re.compile(r"[a-z0-9_](?:[a-z0-9_.]{0,28}[a-z0-9_])?", re.ASCII)
 MEDIA_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".avif", ".mp4"}
 MEDIA_KINDS = {"photos": "사진", "videos": "동영상"}
@@ -206,7 +210,73 @@ def resolve_cutoffs(db, username, destination, mode, since_last):
     return {kind: watermarks.get(kind, last_known) for kind in DOWNLOAD_KINDS[mode]}
 
 
-def download(run_id, username, destination, mode, incremental, date_from, date_to, cutoffs, selected_codes):
+class DownloadStopped(Exception):
+    pass
+
+
+def check_stop(stop):
+    if stop.is_set():
+        raise DownloadStopped()
+
+
+def wait_or_stop(stop, seconds):
+    if stop.wait(seconds):
+        raise DownloadStopped()
+
+
+class StoppableStream:
+    def __init__(self, raw, stop):
+        self.raw = raw
+        self.stop = stop
+
+    def read(self, size):
+        check_stop(self.stop)
+        data = self.raw.read(size)
+        check_stop(self.stop)
+        return data
+
+
+def make_download_stoppable(context, stop):
+    write_raw = context.write_raw
+
+    def write_until_stopped(response, filename):
+        raw = getattr(response, "raw", None)
+        if raw is not None:
+            response.raw = StoppableStream(raw, stop)
+        try:
+            check_stop(stop)
+            write_raw(response, filename)
+        except Exception:
+            if stop.is_set():
+                Path(filename + ".temp").unlink(missing_ok=True)
+            raise
+        finally:
+            if raw is not None:
+                response.raw = raw
+                response.close()
+
+    context.write_raw = write_until_stopped
+
+    def pause():
+        wait_or_stop(stop, min(expovariate(0.6), 15.0) if context.sleep else 0)
+
+    context.do_sleep = pause
+
+
+def readable_instagram_log(message):
+    message = str(message).strip()
+    match = re.search(r"Too many queries in the last time\. Need to wait (\d+) (seconds|minutes), until (\d\d:\d\d)", message)
+    if match:
+        amount, unit, until = match.groups()
+        unit = "초" if unit == "seconds" else "분"
+        return f"요청량 제한에 맞춰 {amount}{unit} 대기 중 · {until}에 다시 시도합니다. 중지 버튼으로 대기를 끝낼 수 있습니다."
+    if "CERTIFICATE_VERIFY_FAILED" in message:
+        return "인스타그램 연결의 TLS 인증서를 확인하지 못했습니다. 연결의 인증서 발급자를 Windows에서 신뢰하는지 확인해 주세요."
+    return message
+
+
+def download(run_id, username, destination, mode, incremental, date_from, date_to, cutoffs,
+             selected_codes, stop):
     with closing(connect()) as db:
         status, added = "failed", 0
         before = None
@@ -216,6 +286,11 @@ def download(run_id, username, destination, mode, incremental, date_from, date_t
         try:
             import instaloader
 
+            class StoppableRateController(instaloader.RateController):
+                def sleep(self, secs):
+                    wait_or_stop(stop, secs)
+
+            check_stop(stop)
             destination.mkdir(exist_ok=True)
             before = media_files(destination)
             selected = DOWNLOAD_KINDS[mode]
@@ -234,18 +309,20 @@ def download(run_id, username, destination, mode, incremental, date_from, date_t
                 download_video_thumbnails=False,
                 save_metadata=False,
                 post_metadata_txt_pattern="",
-                request_timeout=30,
+                request_timeout=REQUEST_TIMEOUT,
                 max_connection_attempts=2,
                 fatal_status_codes=[401, 403, 429],
+                rate_controller=StoppableRateController,
             )
+            make_download_stoppable(loader.context, stop)
             loader.context.log = lambda *msg, sep="", **kwargs: event(
-                db, run_id, sep.join(str(part) for part in msg)
+                db, run_id, readable_instagram_log(sep.join(str(part) for part in msg))
             )
             original_error = loader.context.error
 
             def report_error(message, repeat_at_end=True):
                 original_error(message, repeat_at_end)
-                event(db, run_id, message)
+                event(db, run_id, readable_instagram_log(message))
 
             loader.context.error = report_error
             event(db, run_id, f"@{username} 다운로드 시작 · {destination}")
@@ -268,9 +345,11 @@ def download(run_id, username, destination, mode, incremental, date_from, date_t
                 if "videos" in selected:
                     sources.append(("릴스", profile.get_reels))
             for label, get_posts in sources:
+                check_stop(stop)
                 phase = label
                 event(db, run_id, f"{label} 확인 중")
                 for post in get_posts():
+                    check_stop(stop)
                     if date_from is not None and not date_from <= post.date_local.date() <= date_to:
                         outside_period += 1
                         continue
@@ -302,14 +381,20 @@ def download(run_id, username, destination, mode, incremental, date_from, date_t
                         completed[kind].add(shortcode)
                     processed += 1
                 finished_source = True
+            check_stop(stop)
             status = "failed" if loader.context.error_log else "completed"
             event(db, run_id, f"처리한 게시물 {processed}개 · 건너뛴 게시물 {skipped}개")
             if date_from is not None:
                 event(db, run_id, f"선택 기간 밖 게시물 {outside_period}개 제외")
             if cutoffs:
                 event(db, run_id, f"지난 다운로드 기준보다 오래된 게시물 {older}개 제외")
+        except DownloadStopped:
+            status = "cancelled"
         except Exception as error:
-            event(db, run_id, f"{phase} 오류 · {error}")
+            if stop.is_set():
+                status = "cancelled"
+            else:
+                event(db, run_id, f"{phase} 오류 · {readable_instagram_log(error)}")
         finally:
             if loader:
                 loader.close()
@@ -324,6 +409,8 @@ def download(run_id, username, destination, mode, incremental, date_from, date_t
                     event(db, run_id, f"저장 파일 수를 확인할 수 없습니다 · {error}")
             if status == "failed" and (finished_source or added):
                 status = "partial"
+            if status == "cancelled":
+                event(db, run_id, "사용자가 다운로드를 중지했습니다. 저장이 완료된 파일은 그대로 보관합니다.")
             event(db, run_id, f"새로 저장된 파일 {added}개")
             with db:
                 # An incomplete scan may still have gaps older than its newest file.
@@ -336,6 +423,8 @@ def download(run_id, username, destination, mode, incremental, date_from, date_t
                 db.execute("""
                     UPDATE runs SET status = ?, added = ?, ended = CURRENT_TIMESTAMP WHERE id = ?
                 """, (status, added, run_id))
+            with RUN_CONTROL:
+                STOP_EVENTS.pop(run_id, None)
 
 
 def choose_folder():
@@ -413,7 +502,12 @@ class Handler(BaseHTTPRequestHandler):
             if self.path == "/api/state":
                 accounts = db.execute("SELECT * FROM accounts ORDER BY updated DESC, username")
                 runs = db.execute("SELECT * FROM runs ORDER BY id DESC LIMIT 100")
-                self.reply({"accounts": list(map(dict, accounts)), "runs": list(map(dict, runs))})
+                records = list(map(dict, runs))
+                with RUN_CONTROL:
+                    for record in records:
+                        requested = STOP_EVENTS.get(record["id"])
+                        record["stop_requested"] = requested is not None and requested.is_set() and record["status"] == "running"
+                self.reply({"accounts": list(map(dict, accounts)), "runs": records})
                 return
             match = re.fullmatch(r"/api/runs/([0-9]{1,15})/events", self.path)
             if match:
@@ -457,6 +551,10 @@ class Handler(BaseHTTPRequestHandler):
                 with INSPECT_LOCK:
                     self.preview_photos(self.read_json())
                 return
+            match = re.fullmatch(r"/api/runs/([0-9]{1,15})/stop", self.path)
+            if match:
+                self.stop_download(int(match[1]))
+                return
             if self.path != "/api/runs":
                 self.reply({"error": "주소를 찾을 수 없습니다."}, 404)
                 return
@@ -475,6 +573,16 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(data, dict):
             raise ValueError("요청 형식이 올바르지 않습니다.")
         return data
+
+    def stop_download(self, run_id):
+        with RUN_CONTROL:
+            stop = STOP_EVENTS.get(run_id)
+            if stop is not None:
+                stop.set()
+        if stop is None:
+            self.reply({"error": "이미 끝난 다운로드입니다."}, 409)
+        else:
+            self.reply({"ok": True}, 202)
 
     def preview_photos(self, data):
         global ACTIVE_PREVIEW
@@ -506,7 +614,7 @@ class Handler(BaseHTTPRequestHandler):
             ACTIVE_PREVIEW.close()
             ACTIVE_PREVIEW = None
         loader = instaloader.Instaloader(
-            request_timeout=30, max_connection_attempts=2, fatal_status_codes=[401, 403, 429]
+            request_timeout=REQUEST_TIMEOUT, max_connection_attempts=2, fatal_status_codes=[401, 403, 429]
         )
         try:
             profile = instaloader.Profile.from_username(loader.context, username)
@@ -582,14 +690,20 @@ class Handler(BaseHTTPRequestHandler):
             """, (username, str(destination), mode, incremental, memo,
                   date_from.isoformat() if date_from else None,
                   date_to.isoformat() if date_to else None, since_last)).lastrowid
+        stop = Event()
+        with RUN_CONTROL:
+            STOP_EVENTS[run_id] = stop
         Thread(target=download, args=(run_id, username, destination, mode, incremental, date_from, date_to,
-                                      cutoffs, selected_codes),
+                                      cutoffs, selected_codes, stop),
                daemon=True).start()
         self.reply({"id": run_id}, 202)
 
 
 def serve_installed(open_browser=True):
     global DB, GATE
+    import truststore
+
+    truststore.inject_into_ssl()
     data = ROOT / ".local"
     DB = data / "state.sqlite3"
     config = json.loads((data / "config.json").read_text(encoding="utf-8"))
